@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import datetime
 from io import BytesIO
-from utils.helpers import load_data, filter_data, save_data
+from helpers import load_data, filter_data, save_data
 
 DATA_PATH = "registro2.csv"
 
