@@ -4,7 +4,7 @@ import datetime
 from io import BytesIO
 from utils.helpers import load_data, filter_data, save_data
 
-DATA_PATH = "data/registro2.csv"
+DATA_PATH = "registro2.csv"
 
 DISPLAY_MAP = {
     "estado":                            "ESTADO",
