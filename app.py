@@ -6,6 +6,7 @@ from utils.helpers import load_data, filter_data, save_data
 
 DATA_PATH = "data/registro2.csv"
 
+# Mapeo interno → encabezado original
 DISPLAY_MAP = {
     "estado":                            "ESTADO",
     "n°":                                "N°",
@@ -29,51 +30,94 @@ DISPLAY_MAP = {
     "archivo":                           "ARCHIVO"
 }
 
-st.set_page_config(page_title="Comercio Ambulatorio", layout="wide")
+st.set_page_config(
+    page_title="📋 Comercio Ambulatorio",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Sidebar: búsqueda y exportación
-st.sidebar.header("🔎 Controles")
+# --- Carga de datos ---
 df = load_data(DATA_PATH)
-query = st.sidebar.text_input("Buscar", placeholder="Nombre, DNI, Estado…")
-filtered = filter_data(df, query)
+
+# --- Sidebar: búsqueda con botón y exportación ---
+st.sidebar.header("🔎 Controles")
+
+search_input = st.sidebar.text_input(
+    "Buscar",
+    placeholder="Nombre, DNI, Estado…",
+    key="search_input"
+)
+if st.sidebar.button("🔍 Buscar"):
+    filtered = filter_data(df, search_input)
+else:
+    filtered = df.copy()
 
 st.sidebar.markdown("---")
-st.sidebar.write("📥 **Exportar datos**")
+st.sidebar.write("📥 **Exportar datos filtrados**")
+# CSV (;)
 csv_data = filtered.to_csv(index=False, sep=";", encoding="utf-8").encode()
 st.sidebar.download_button("CSV (;)", csv_data, "registros.csv", "text/csv")
+
+# Excel (.xlsx)
 output = BytesIO()
 with pd.ExcelWriter(output, engine="xlsxwriter",
                     datetime_format="yyyy-mm-dd", date_format="yyyy-mm-dd") as writer:
     filtered.rename(columns=DISPLAY_MAP).to_excel(writer, index=False, sheet_name="Registros")
-st.sidebar.download_button("Excel (.xlsx)", output.getvalue(),
-                            "registros.xlsx",
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+st.sidebar.download_button(
+    "Excel (.xlsx)",
+    output.getvalue(),
+    "registros.xlsx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
 
-# Métricas
+# --- Sidebar: columnas candidatas para gráfico (≤5 valores únicos) ---
+MAX_CAT = 5
+candidate_cols = [
+    col for col in df.columns
+    if df[col].nunique(dropna=True) <= MAX_CAT
+]
+st.sidebar.markdown("---")
+st.sidebar.write("📊 Columnas para gráficas (≤5 valores únicos):")
+st.sidebar.write(candidate_cols)
+x_col = st.sidebar.selectbox(
+    "Eje X (categoría)",
+    options=[""] + candidate_cols
+)
+
+# --- Métricas y gráfico dinámico ---
 st.title("📋 Registro de Comercio Ambulatorio")
 c1, c2, c3 = st.columns(3)
 c1.metric("Total registros", len(filtered))
 if "estado" in df.columns:
-    c2.metric("Autorizados", int((df.estado == "AUTORIZADO").sum()))
-    c3.metric("En espera", int((df.estado == "ESPERA").sum()))
+    c2.metric("Autorizados", int((filtered.estado == "AUTORIZADO").sum()))
+    c3.metric("En espera", int((filtered.estado == "ESPERA").sum()))
 
-# Gráfico
-if "estado" in df.columns:
-    st.divider()
-    st.subheader("📊 Distribución por Estado")
-    st.bar_chart(df.estado.value_counts(), height=300)
+st.divider()
+st.subheader("📊 Gráfico dinámico")
 
-# Pestañas
-tab1, tab2, tab3 = st.tabs(["📖 Ver Registros", "➕ Agregar Registro", "✏️ Editar / 🗑️ Eliminar"])
+if x_col:
+    counts = filtered[x_col].value_counts()
+    st.bar_chart(counts, height=400)
+else:
+    st.info("Seleccione una columna válida para el gráfico.")
 
-# --- Tab 1: Ver registros ---
+# --- Pestañas: Ver ▸ Agregar ▸ Editar/Eliminar ---
+tab1, tab2, tab3 = st.tabs([
+    "📖 Ver Registros",
+    "➕ Agregar Registro",
+    "✏️ Editar / 🗑️ Eliminar"
+])
+
+# Tab 1: Ver registros
 with tab1:
     st.subheader("📋 Resultados de la búsqueda")
-    st.dataframe(filtered.rename(columns=DISPLAY_MAP),
-                use_container_width=True,
-                height=600)
+    st.dataframe(
+        filtered.rename(columns=DISPLAY_MAP),
+        use_container_width=True,
+        height=600
+    )
 
-# --- Tab 2: Agregar registro ---
+# Tab 2: Agregar registro
 with tab2:
     st.subheader("➕ Agregar nuevo registro")
     with st.form("add_form", clear_on_submit=True):
@@ -97,15 +141,14 @@ with tab2:
             try: st.experimental_rerun()
             except: pass
 
-# --- Tab 3: Editar / Eliminar ---
+# Tab 3: Editar / Eliminar
 with tab3:
     st.subheader("✏️ Editar / 🗑️ Eliminar registros")
     if filtered.empty:
         st.info("No hay registros para modificar.")
     else:
-        # Número de índice
         idx = st.number_input(
-            "Índice a editar/eliminar",
+            "Índice a modificar/eliminar",
             min_value=int(filtered.index.min()),
             max_value=int(filtered.index.max()),
             value=int(filtered.index.min()),
@@ -118,7 +161,7 @@ with tab3:
             with st.form("edit_form", clear_on_submit=False):
                 edits = {}
                 for col in df.columns:
-                    label = DISPLAY_MAP.get(col, col.replace("_"," ").title())
+                    label = DISPLAY_MAP.get(col, col.replace("_", " ").title())
                     cell = row.get(col, "")
                     if "fecha" in col:
                         if pd.isna(cell) or cell == "":
@@ -131,7 +174,7 @@ with tab3:
                         edits[col] = st.text_input(label, value=cell or "", key=f"e_{col}")
                 if st.form_submit_button("Guardar cambios"):
                     for k, v in edits.items():
-                        df.at[idx, k] = v.strftime("%Y-%m-%d") if hasattr(v, "strftime") else v
+                        df.at[idx, k] = (v.strftime("%Y-%m-%d") if hasattr(v, "strftime") else v)
                     save_data(df, DATA_PATH)
                     st.success("✅ Registro actualizado")
                     try: st.experimental_rerun()
@@ -144,4 +187,3 @@ with tab3:
                 st.success("🗑️ Registro eliminado")
                 try: st.experimental_rerun()
                 except: pass
-
