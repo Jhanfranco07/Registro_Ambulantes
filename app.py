@@ -5,6 +5,7 @@ from io import BytesIO
 import plotly.express as px
 from utils.helpers import load_data, filter_data, save_data
 
+# Ruta a tu CSV
 DATA_PATH = "data/registro2.csv"
 
 # Mapeo interno → encabezado original
@@ -31,57 +32,72 @@ DISPLAY_MAP = {
     "archivo":                           "ARCHIVO"
 }
 
+# Configuración de la página
 st.set_page_config(
     page_title="📋 Comercio Ambulatorio",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
+# CSS para ocultar la flechita de la sidebar en móvil
+st.markdown("""
+    <style>
+      .css-1lcbmhc.e1fqkh3o1, .css-1d391kg {
+        visibility: hidden;
+        width: 0;
+        padding: 0;
+      }
+    </style>
+""", unsafe_allow_html=True)
+
 # 1. Carga de datos
 df = load_data(DATA_PATH)
 
-# 2. Sidebar: búsqueda con botón y exportaciones
-st.sidebar.header("🔎 Controles")
+# 2. Controles dentro de un expander (más accesible en móvil)
+with st.expander("🔎 Controles de Búsqueda y Exportación", expanded=True):
+    # Búsqueda
+    search_input = st.text_input("Buscar", placeholder="Nombre, DNI, Estado…")
+    if st.button("🔍 Buscar", key="btn_search"):
+        filtered = filter_data(df, search_input)
+    else:
+        filtered = df.copy()
 
-search_input = st.sidebar.text_input(
-    "Buscar",
-    placeholder="Nombre, DNI, Estado…"
-)
-if st.sidebar.button("🔍 Buscar"):
-    filtered = filter_data(df, search_input)
-else:
-    filtered = df.copy()
+    st.markdown("---")
+    # Exportar CSV (;)
+    csv_data = filtered.to_csv(index=False, sep=";", encoding="utf-8").encode()
+    st.download_button(
+        "📥 Descargar CSV (;)", csv_data,
+        file_name="registros_filtrados.csv",
+        mime="text/csv",
+        key="dl_csv"
+    )
 
-st.sidebar.markdown("---")
-st.sidebar.write("📥 **Exportar datos filtrados**")
-# CSV (;)
-csv_data = filtered.to_csv(index=False, sep=";", encoding="utf-8").encode()
-st.sidebar.download_button("CSV (;)", csv_data, "registros.csv", "text/csv")
-# Excel (.xlsx)
-output = BytesIO()
-with pd.ExcelWriter(output, engine="xlsxwriter",
-                    datetime_format="yyyy-mm-dd", date_format="yyyy-mm-dd") as writer:
-    filtered.rename(columns=DISPLAY_MAP).to_excel(writer, index=False, sheet_name="Registros")
-st.sidebar.download_button(
-    "Excel (.xlsx)",
-    output.getvalue(),
-    "registros.xlsx",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
+    # Exportar Excel (.xlsx)
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter",
+                        datetime_format="yyyy-mm-dd", date_format="yyyy-mm-dd") as writer:
+        filtered.rename(columns=DISPLAY_MAP).to_excel(
+            writer, index=False, sheet_name="Registros"
+        )
+    st.download_button(
+        "📥 Descargar Excel (.xlsx)",
+        output.getvalue(),
+        file_name="registros_filtrados.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="dl_xlsx"
+    )
 
-# 3. Métricas
+# 3. Métricas principales
 st.title("📋 Registro de Comercio Ambulatorio")
-c1, c2, c3 = st.columns(3)
-c1.metric("Total registros", len(filtered))
+col1, col2, col3 = st.columns(3)
+col1.metric("Total registros", len(filtered))
 if "estado" in filtered.columns:
-    c2.metric("Autorizados", int((filtered.estado == "AUTORIZADO").sum()))
-    c3.metric("En espera", int((filtered.estado == "ESPERA").sum()))
+    col2.metric("Autorizados", int((filtered.estado == "AUTORIZADO").sum()))
+    col3.metric("En espera", int((filtered.estado == "ESPERA").sum()))
 
-# 4. Tendencia Mensual de registros por fecha_de_ingreso
+# 4. Tendencia mensual de registros
 st.divider()
 st.subheader("📈 Tendencia Mensual de Registros")
-
-# Convertir a datetime y agrupar
 df_time = filtered.copy()
 df_time["fecha_de_ingreso"] = pd.to_datetime(
     df_time["fecha_de_ingreso"], dayfirst=True, errors="coerce"
@@ -94,13 +110,12 @@ monthly = (
 )
 monthly["mes"] = monthly["fecha_de_ingreso"].dt.strftime("%b %Y")
 
-# Gráfico de barras coloreado por mes
 fig = px.bar(
     monthly,
     x="mes",
     y="conteo",
     color="mes",
-    title="Registros por Mes",
+    title="Registros por Mes de Ingreso",
     labels={"mes": "Mes", "conteo": "Cantidad de registros"}
 )
 st.plotly_chart(fig, use_container_width=True, height=400)
@@ -147,7 +162,7 @@ with tab2:
             except AttributeError:
                 pass
 
-# Tab 3: Editar / Eliminar
+# Tab 3: Editar / Eliminar registros
 with tab3:
     st.subheader("✏️ Editar / 🗑️ Eliminar registros")
     if filtered.empty:
@@ -180,7 +195,9 @@ with tab3:
                         edits[col] = st.text_input(label, value=cell or "", key=f"e_{col}")
                 if st.form_submit_button("Guardar cambios"):
                     for k, v in edits.items():
-                        df.at[idx, k] = v.strftime("%Y-%m-%d") if hasattr(v, "strftime") else v
+                        df.at[idx, k] = (
+                            v.strftime("%Y-%m-%d") if hasattr(v, "strftime") else v
+                        )
                     save_data(df, DATA_PATH)
                     st.success("✅ Registro actualizado")
                     try:
@@ -196,4 +213,3 @@ with tab3:
                     st.experimental_rerun()
                 except AttributeError:
                     pass
-
