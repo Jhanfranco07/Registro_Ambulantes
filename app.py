@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import datetime
 from io import BytesIO
+import plotly.express as px
 from utils.helpers import load_data, filter_data, save_data
 
 DATA_PATH = "data/registro2.csv"
@@ -36,16 +37,15 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- Carga de datos ---
+# 1. Carga de datos
 df = load_data(DATA_PATH)
 
-# --- Sidebar: búsqueda con botón y exportación ---
+# 2. Sidebar: búsqueda con botón y exportaciones
 st.sidebar.header("🔎 Controles")
 
 search_input = st.sidebar.text_input(
     "Buscar",
-    placeholder="Nombre, DNI, Estado…",
-    key="search_input"
+    placeholder="Nombre, DNI, Estado…"
 )
 if st.sidebar.button("🔍 Buscar"):
     filtered = filter_data(df, search_input)
@@ -57,7 +57,6 @@ st.sidebar.write("📥 **Exportar datos filtrados**")
 # CSV (;)
 csv_data = filtered.to_csv(index=False, sep=";", encoding="utf-8").encode()
 st.sidebar.download_button("CSV (;)", csv_data, "registros.csv", "text/csv")
-
 # Excel (.xlsx)
 output = BytesIO()
 with pd.ExcelWriter(output, engine="xlsxwriter",
@@ -70,38 +69,43 @@ st.sidebar.download_button(
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
 
-# --- Sidebar: columnas candidatas para gráfico (≤5 valores únicos) ---
-MAX_CAT = 5
-candidate_cols = [
-    col for col in df.columns
-    if df[col].nunique(dropna=True) <= MAX_CAT
-]
-st.sidebar.markdown("---")
-st.sidebar.write("📊 Columnas para gráficas (≤5 valores únicos):")
-st.sidebar.write(candidate_cols)
-x_col = st.sidebar.selectbox(
-    "Eje X (categoría)",
-    options=[""] + candidate_cols
-)
-
-# --- Métricas y gráfico dinámico ---
+# 3. Métricas
 st.title("📋 Registro de Comercio Ambulatorio")
 c1, c2, c3 = st.columns(3)
 c1.metric("Total registros", len(filtered))
-if "estado" in df.columns:
+if "estado" in filtered.columns:
     c2.metric("Autorizados", int((filtered.estado == "AUTORIZADO").sum()))
     c3.metric("En espera", int((filtered.estado == "ESPERA").sum()))
 
+# 4. Tendencia Mensual de registros por fecha_de_ingreso
 st.divider()
-st.subheader("📊 Gráfico dinámico")
+st.subheader("📈 Tendencia Mensual de Registros")
 
-if x_col:
-    counts = filtered[x_col].value_counts()
-    st.bar_chart(counts, height=400)
-else:
-    st.info("Seleccione una columna válida para el gráfico.")
+# Convertir a datetime y agrupar
+df_time = filtered.copy()
+df_time["fecha_de_ingreso"] = pd.to_datetime(
+    df_time["fecha_de_ingreso"], dayfirst=True, errors="coerce"
+)
+monthly = (
+    df_time
+      .groupby(df_time["fecha_de_ingreso"].dt.to_period("M"))
+      .size()
+      .reset_index(name="conteo")
+)
+monthly["mes"] = monthly["fecha_de_ingreso"].dt.strftime("%b %Y")
 
-# --- Pestañas: Ver ▸ Agregar ▸ Editar/Eliminar ---
+# Gráfico de barras coloreado por mes
+fig = px.bar(
+    monthly,
+    x="mes",
+    y="conteo",
+    color="mes",
+    title="Registros por Mes",
+    labels={"mes": "Mes", "conteo": "Cantidad de registros"}
+)
+st.plotly_chart(fig, use_container_width=True, height=400)
+
+# 5. Pestañas: Ver ▸ Agregar ▸ Editar/Eliminar
 tab1, tab2, tab3 = st.tabs([
     "📖 Ver Registros",
     "➕ Agregar Registro",
@@ -138,8 +142,10 @@ with tab2:
             df2 = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
             save_data(df2, DATA_PATH)
             st.success("✅ Registro guardado")
-            try: st.experimental_rerun()
-            except: pass
+            try:
+                st.experimental_rerun()
+            except AttributeError:
+                pass
 
 # Tab 3: Editar / Eliminar
 with tab3:
@@ -174,16 +180,20 @@ with tab3:
                         edits[col] = st.text_input(label, value=cell or "", key=f"e_{col}")
                 if st.form_submit_button("Guardar cambios"):
                     for k, v in edits.items():
-                        df.at[idx, k] = (v.strftime("%Y-%m-%d") if hasattr(v, "strftime") else v)
+                        df.at[idx, k] = v.strftime("%Y-%m-%d") if hasattr(v, "strftime") else v
                     save_data(df, DATA_PATH)
                     st.success("✅ Registro actualizado")
-                    try: st.experimental_rerun()
-                    except: pass
-
-        else:  # Eliminar
+                    try:
+                        st.experimental_rerun()
+                    except AttributeError:
+                        pass
+        else:
             if st.button("Eliminar registro"):
                 df2 = df.drop(idx).reset_index(drop=True)
                 save_data(df2, DATA_PATH)
                 st.success("🗑️ Registro eliminado")
-                try: st.experimental_rerun()
-                except: pass
+                try:
+                    st.experimental_rerun()
+                except AttributeError:
+                    pass
+
